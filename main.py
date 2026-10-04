@@ -518,22 +518,45 @@ def build_sales_detail_table(sales: list[tuple]) -> list[str]:
     return lines
 
 
-def write_sales_report(path: Path, title: str, table_lines: list[str], sales: list[tuple]) -> None:
+def write_sales_report(
+    path: Path, title: str, table_lines: list[str], sales: list[tuple],
+    period: str,
+) -> None:
     line_width = max(display_width(line) for line in table_lines)
     separator = "=" * line_width
     total_quantity = sum(sale[3] for sale in sales)
     total_revenue = sum(sale[3] * sale[4] for sale in sales)
+    totals: dict[int, list[float]] = {}
+    for sale in sales:
+        values = totals.setdefault(sale[2], [0, 0.0])
+        values[0] += sale[3]
+        values[1] += sale[3] * sale[4]
+
+    best_seller = "No sales in this period"
+    if totals:
+        best_id = min(
+            totals, key=lambda item_id: (-totals[item_id][0], -totals[item_id][1], item_id)
+        )
+        name = item_name_map().get(best_id, "ไม่พบชื่อสินค้า")
+        best_seller = f"{best_id} {name} | {int(totals[best_id][0]):,} units sold"
+
+    header = [
+        f" Generated At  : {datetime.now().astimezone():%Y/%m/%d %H:%M:%S}",
+        f" Report Period : {period}",
+    ]
+    header.extend([
+        f" Products Sold : {len(totals):,} types | {len(sales):,} sale records",
+        f" All Sales     : {total_quantity:,} units | {total_revenue:,.2f} THB",
+        f" Best Seller   : {best_seller}",
+    ])
     lines = [
         separator,
         title.center(line_width),
         separator,
-        f" Generated At   : {datetime.now().astimezone():%Y/%m/%d %H:%M:%S}",
-        f" Sale Records  : {len(sales):,}",
-        f" Quantity Sold : {total_quantity:,}",
-        f" Total Revenue : {total_revenue:,.2f} THB",
-        separator,
-        "",
     ]
+    for text in header:
+        lines.extend(wrap_display(text, line_width))
+    lines.extend([separator, ""])
     lines.extend(table_lines)
 
     footer = "END OF REPORT - สิ้นสุดรายงาน"
@@ -553,16 +576,22 @@ def write_sales_report(path: Path, title: str, table_lines: list[str], sales: li
         file.write("\n".join(lines) + "\n")
         file.flush()
         os.fsync(file.fileno())
-    print(f"สร้างรายงานแล้ว: {path}")
+    print(f"สร้างรายงานแล้ว: {path.name}")
 
 
 def generate_top10_sales_report() -> None:
     sales = read_records(SALE_FILE, SALE_STRUCT)
+    period = "All recorded sales"
+    if sales:
+        first = datetime.fromtimestamp(min(sale[0] for sale in sales)).astimezone()
+        last = datetime.fromtimestamp(max(sale[0] for sale in sales)).astimezone()
+        period += f" ({first:%Y/%m/%d} - {last:%Y/%m/%d})"
     write_sales_report(
         TOP10_REPORT_FILE,
         "TOP 10 BEST-SELLING ITEMS REPORT",
         build_top10_sales_table(sales),
         sales,
+        period,
     )
 
 
@@ -578,6 +607,7 @@ def generate_last_30_days_report() -> None:
         "SALES DURING THE LAST 30 DAYS",
         build_sales_detail_table(sales),
         sales,
+        f"{start:%Y/%m/%d %H:%M} - {now:%Y/%m/%d %H:%M} (last 30 days)",
     )
 
 
@@ -592,6 +622,7 @@ def generate_today_sales_report() -> None:
         "TODAY SALES REPORT",
         build_sales_detail_table(sales),
         sales,
+        f"{today:%Y/%m/%d} (today)",
     )
 
 
